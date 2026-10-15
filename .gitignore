@@ -1,0 +1,21 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+venv/
+env/
+.env
+
+
+
+# Strategy Trade Logs & CSVs
+logs/*.csv
+!logs/.gitkeep
+trades_*.csv
+paper_trades*.csv
+
+# OS metadata
+.DS_Store
+Thumbs.db
