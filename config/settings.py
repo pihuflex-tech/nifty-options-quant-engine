@@ -1,6 +1,19 @@
 import os
 from dataclasses import dataclass
 
+# Automatically load .env if present (Zero-dependency standard library implementation)
+_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+if os.path.isfile(_env_path):
+    try:
+        with open(_env_path, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    os.environ.setdefault(_k.strip(), _v.strip())
+    except Exception:
+        pass
+
 @dataclass(frozen=True)
 class TradingConfig:
     FEED_HOST: str = os.getenv("FEED_HOST", "127.0.0.1")

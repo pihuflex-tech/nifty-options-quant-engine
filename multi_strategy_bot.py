@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import threading
+import traceback
 from datetime import datetime
 from urllib.request import urlopen, Request
 from urllib.error import URLError
@@ -41,16 +42,30 @@ LIVE_BOT_STATE = {
     "orb_high": None,
     "orb_low": None,
     "orb_set": False,
+    "open_mtm": 0.0,
+    "realized_pnl": 0.0,
+    "charges_paid": 0.0,
+    "net_pnl": 0.0,
+    "active_count": 0,
     "strategies": []
 }
 
 class BotStateHandler(BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
     def do_GET(self):
         with STATE_LOCK:
             payload = json.dumps(LIVE_BOT_STATE).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
         self.wfile.write(payload)
 
@@ -58,8 +73,11 @@ class BotStateHandler(BaseHTTPRequestHandler):
         return  # Suppress HTTP GET polling logs
 
 def start_state_server():
-    server = HTTPServer((CONFIG.BOT_STATE_HOST, CONFIG.BOT_STATE_PORT), BotStateHandler)
-    server.serve_forever()
+    try:
+        server = HTTPServer((CONFIG.BOT_STATE_HOST, CONFIG.BOT_STATE_PORT), BotStateHandler)
+        server.serve_forever()
+    except Exception as e:
+        print(f"[!] Dashboard HTTP server error on {CONFIG.BOT_STATE_HOST}:{CONFIG.BOT_STATE_PORT}: {e}")
 
 def main():
     market = MarketStateManager()
@@ -117,6 +135,11 @@ def main():
                 strat.evaluate(spot, market, contracts)
 
             strat_snapshots = [s.to_dict() for s in strategies]
+            total_open_mtm = round(sum(s.get("open_mtm", 0.0) for s in strat_snapshots), 2)
+            total_realized = round(sum(s.get("realized_pnl", 0.0) for s in strat_snapshots), 2)
+            total_charges = round(sum(s.get("charges_paid", 0.0) for s in strat_snapshots), 2)
+            total_net = round(total_realized - total_charges, 2)
+            active_count = sum(1 for s in strat_snapshots if s.get("status") == "ACTIVE")
 
             with STATE_LOCK:
                 LIVE_BOT_STATE["timestamp"] = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -128,6 +151,11 @@ def main():
                 LIVE_BOT_STATE["orb_high"] = round(market.orb_high, 2) if market.orb_high is not None else None
                 LIVE_BOT_STATE["orb_low"] = round(market.orb_low, 2) if market.orb_low is not None else None
                 LIVE_BOT_STATE["orb_set"] = market.orb_set
+                LIVE_BOT_STATE["open_mtm"] = total_open_mtm
+                LIVE_BOT_STATE["realized_pnl"] = total_realized
+                LIVE_BOT_STATE["charges_paid"] = total_charges
+                LIVE_BOT_STATE["net_pnl"] = total_net
+                LIVE_BOT_STATE["active_count"] = active_count
                 LIVE_BOT_STATE["strategies"] = strat_snapshots
 
             time.sleep(CONFIG.POLL_INTERVAL)
@@ -137,7 +165,9 @@ def main():
         except KeyboardInterrupt:
             print("\n[*] Bot stopped manually. CSV logs saved.")
             break
-        except Exception:
+        except Exception as e:
+            print(f"[!] Error in main loop: {e}")
+            traceback.print_exc()
             time.sleep(0.5)
 
 if __name__ == "__main__":
